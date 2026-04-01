@@ -1,30 +1,38 @@
+use crate::terminal::{Terminal, enable_raw_mode, iscntrl};
 use core::panic;
+use rustix::termios::tcgetattr;
 use std::{
-    io::{self, Read, stdin},
-    os::fd::AsRawFd,
+    io::{self, ErrorKind, Read, stdin},
+    os::fd::AsFd,
 };
-use termios::*;
 pub mod terminal;
-use terminal::{OrigTerminos, enable_raw_mode};
 
 fn main() {
-    let orig = match Termios::from_fd(stdin().as_raw_fd()) {
-        Ok(termios) => termios,
-        Err(e) => panic!("Error: {e}"),
+    let terminal = match tcgetattr(stdin().as_fd()) {
+        Ok(terminal) => terminal,
+        Err(e) => panic!("Error in get terminal: {e}"),
     };
-    let orig = OrigTerminos::new(orig);
-    match enable_raw_mode(&orig.get_data()) {
+    let terminal = Terminal::new(&terminal);
+
+    match enable_raw_mode(&mut terminal.mod_terminal.borrow_mut()) {
         Ok(_) => (),
-        Err(e) => panic!("Error: {e}"),
+        Err(e) => panic!("Error enabling raw mode: {e}"),
     };
 
     println!("\r");
     let mut c = [0];
     while c[0] as char != 'q' {
-        match io::stdin().read(&mut c) {
+        match io::stdin().read_exact(&mut c) {
             Ok(_) => (),
-            Err(e) => panic!("Error: {e}"),
+            Err(error) => match error.kind() {
+                ErrorKind::UnexpectedEof => c[0] = 0,
+                _ => panic!("Error reading: {error}"),
+            },
         };
-        println!("{}\r", c[0] as char);
+        if iscntrl(c[0]) {
+            println!("{}\r", c[0]);
+        } else {
+            println!("{} ({})\r", c[0], c[0] as char);
+        }
     }
 }
