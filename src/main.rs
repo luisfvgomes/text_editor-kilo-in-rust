@@ -1,10 +1,9 @@
-use crate::terminal::{Terminal, enable_raw_mode, iscntrl};
+use crate::editor::editor_process_keypress;
+use crate::terminal::{Terminal, enable_raw_mode};
 use core::panic;
 use rustix::termios::tcgetattr;
-use std::{
-    io::{self, ErrorKind, Read, stdin},
-    os::fd::AsFd,
-};
+use std::{io::stdin, os::fd::AsFd};
+pub mod editor;
 pub mod terminal;
 
 fn main() {
@@ -19,20 +18,8 @@ fn main() {
         Err(e) => panic!("Error enabling raw mode: {e}"),
     };
 
-    println!("\r");
-    let mut c = [0];
-    while c[0] as char != 'q' {
-        match io::stdin().read_exact(&mut c) {
-            Ok(_) => (),
-            Err(error) => match error.kind() {
-                ErrorKind::UnexpectedEof => c[0] = 0,
-                _ => panic!("Error reading: {error}"),
-            },
-        };
-        if iscntrl(c[0]) {
-            println!("{}\r", c[0]);
-        } else {
-            println!("{} ({})\r", c[0], c[0] as char);
-        }
+    let mut is_loop = true;
+    while is_loop {
+        is_loop = editor_process_keypress();
     }
 }

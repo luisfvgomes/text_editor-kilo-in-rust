@@ -1,7 +1,10 @@
 use core::{error::Error, panic};
 use rustix::termios::{self, SpecialCodeIndex};
 use std::cell::RefCell;
-use std::{io::stdin, os::fd::AsFd};
+use std::{
+    io::{ErrorKind, Read, stdin},
+    os::fd::AsFd,
+};
 
 pub struct Terminal<'a> {
     pub mod_terminal: RefCell<termios::Termios>,
@@ -43,4 +46,23 @@ pub fn iscntrl(c: u8) -> bool {
         return true;
     }
     false
+}
+
+pub fn editor_read_key() -> u8 {
+    let mut buffer = [0];
+    match stdin().read_exact(&mut buffer) {
+        Ok(_) => (),
+        Err(error) => match error.kind() {
+            ErrorKind::UnexpectedEof => buffer[0] = 0,
+            _ => panic!("Error reading: {error}"),
+        },
+    };
+    buffer[0]
+}
+
+#[macro_export]
+macro_rules! CTRL_KEY {
+    ($k:expr) => {
+        $k & 0x1f
+    };
 }
