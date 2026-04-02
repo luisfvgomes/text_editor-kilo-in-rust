@@ -1,7 +1,10 @@
 use core::{error::Error, panic};
 use rustix::termios::{self, SpecialCodeIndex};
 use std::cell::RefCell;
+use std::io::stdout;
 use std::{io::stdin, os::fd::AsFd};
+
+use crate::editor::editor_refresh_screen;
 
 pub struct Terminal<'a> {
     pub mod_terminal: RefCell<termios::Termios>,
@@ -21,6 +24,10 @@ impl<'a> Drop for Terminal<'a> {
         match disable_raw_mode(self.orig_terminal) {
             Ok(_) => (),
             Err(e) => panic!("Error disabling raw mode: {e}"),
+        }
+        match editor_refresh_screen(&mut stdout().lock()) {
+            Ok(_) => (),
+            Err(e) => panic!("Error refreshing screen: {e}"),
         }
     }
 }
