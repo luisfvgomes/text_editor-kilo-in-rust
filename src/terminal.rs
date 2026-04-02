@@ -1,10 +1,7 @@
 use core::{error::Error, panic};
 use rustix::termios::{self, SpecialCodeIndex};
 use std::cell::RefCell;
-use std::{
-    io::{ErrorKind, Read, stdin},
-    os::fd::AsFd,
-};
+use std::{io::stdin, os::fd::AsFd};
 
 pub struct Terminal<'a> {
     pub mod_terminal: RefCell<termios::Termios>,
@@ -36,7 +33,7 @@ pub fn enable_raw_mode(terminal: &mut termios::Termios) -> Result<(), Box<dyn Er
     Ok(())
 }
 
-pub fn disable_raw_mode(terminal: &termios::Termios) -> Result<(), Box<dyn Error>> {
+fn disable_raw_mode(terminal: &termios::Termios) -> Result<(), Box<dyn Error>> {
     termios::tcsetattr(stdin().as_fd(), termios::OptionalActions::Flush, terminal)?;
     Ok(())
 }
@@ -46,18 +43,6 @@ pub fn iscntrl(c: u8) -> bool {
         return true;
     }
     false
-}
-
-pub fn editor_read_key() -> u8 {
-    let mut buffer = [0];
-    match stdin().read_exact(&mut buffer) {
-        Ok(_) => (),
-        Err(error) => match error.kind() {
-            ErrorKind::UnexpectedEof => buffer[0] = 0,
-            _ => panic!("Error reading: {error}"),
-        },
-    };
-    buffer[0]
 }
 
 #[macro_export]
