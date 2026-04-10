@@ -1,9 +1,8 @@
-use core::panic;
-use rustix::io::Result;
-use rustix::termios::tcgetattr;
 use rustix::termios::{self, SpecialCodeIndex, tcgetwinsize};
+use rustix::termios::{Winsize, tcgetattr};
 use std::cell::RefCell;
-use std::io::{StdinLock, StdoutLock, stdout};
+use std::error::Error;
+use std::io::{BufRead, StdinLock, StdoutLock, Write, stdout};
 use std::{io::stdin, os::fd::AsFd};
 
 use crate::editor::editor_refresh_screen;
@@ -19,14 +18,15 @@ pub struct TerminalConfig<'a> {
 impl<'a> TerminalConfig<'a> {
     pub fn new(
         orig_terminal: termios::Termios,
+        mod_terminal: termios::Termios,
         screen_rows: u16,
         screen_cols: u16,
         terminal_in: StdinLock<'a>,
         terminal_out: StdoutLock<'a>,
     ) -> Self {
-        let mod_term = RefCell::new(orig_terminal.clone());
+        let mod_terminal = RefCell::new(mod_terminal);
         Self {
-            mod_terminal: mod_term,
+            mod_terminal,
             orig_terminal,
             screen_rows,
             screen_cols,
@@ -48,15 +48,15 @@ impl<'a> Drop for TerminalConfig<'a> {
     }
 }
 
-pub fn enable_raw_mode(terminal: &mut termios::Termios) -> Result<()> {
+pub fn enable_raw_mode(mut terminal: termios::Termios) -> Result<termios::Termios, Box<dyn Error>> {
     terminal.make_raw();
     terminal.special_codes[SpecialCodeIndex::VMIN] = 0;
     terminal.special_codes[SpecialCodeIndex::VTIME] = 1;
-    termios::tcsetattr(stdin().as_fd(), termios::OptionalActions::Flush, terminal)?;
-    Ok(())
+    termios::tcsetattr(stdin().as_fd(), termios::OptionalActions::Flush, &terminal)?;
+    Ok(terminal)
 }
 
-fn disable_raw_mode(terminal: &termios::Termios) -> Result<()> {
+fn disable_raw_mode(terminal: &termios::Termios) -> Result<(), Box<dyn Error>> {
     termios::tcsetattr(stdin().as_fd(), termios::OptionalActions::Flush, terminal)?;
     Ok(())
 }
@@ -75,25 +75,58 @@ macro_rules! CTRL_KEY {
     };
 }
 
-pub fn get_window_size(terminal_out: &StdoutLock) -> Result<(u16, u16)> {
-    let ws = tcgetwinsize(terminal_out)?;
+pub fn get_window_size(
+    terminal_out: &mut StdoutLock,
+    terminal_in: &mut StdinLock,
+) -> Result<(u16, u16), Box<dyn Error>> {
+    let ws = match tcgetwinsize(&terminal_out) {
+        Ok(ws) => ws,
+        Err(_) => {
+            terminal_out.write_all(b"\x1b[999C\x1b[999B")?; // go to the last place on scren
+            get_cursor_position(terminal_out, terminal_in)?
+        }
+    };
     Ok((ws.ws_row, ws.ws_col))
 }
 
-pub fn init_terminal_config() -> Result<TerminalConfig<'static>> {
-    let terminal = match tcgetattr(stdin().as_fd()) {
-        Ok(terminal) => terminal,
-        Err(e) => panic!("Error in get terminal: {e}"),
-    };
-    let terminal_out = stdout().lock();
-    let terminal_in = stdin().lock();
-    let ws = get_window_size(&terminal_out)?;
+pub fn init_terminal_config() -> Result<TerminalConfig<'static>, Box<dyn Error>> {
+    let orig_terminal = tcgetattr(stdin().as_fd())?;
+    let mod_terminal = enable_raw_mode(orig_terminal.clone())?;
+    let mut terminal_out = stdout().lock();
+    let mut terminal_in = stdin().lock();
+    let ws = get_window_size(&mut terminal_out, &mut terminal_in)?;
 
-    let terminal_config = TerminalConfig::new(terminal, ws.0, ws.1, terminal_in, terminal_out);
+    let terminal_config = TerminalConfig::new(
+        orig_terminal,
+        mod_terminal,
+        ws.0,
+        ws.1,
+        terminal_in,
+        terminal_out,
+    );
 
-    match enable_raw_mode(&mut terminal_config.mod_terminal.borrow_mut()) {
-        Ok(_) => (),
-        Err(e) => panic!("Error enabling raw mode: {e}"),
-    };
     Ok(terminal_config)
+}
+
+fn get_cursor_position(
+    terminal_out: &mut StdoutLock,
+    terminal_in: &mut StdinLock,
+) -> Result<Winsize, Box<dyn Error>> {
+    terminal_out.write_all(b"\x1b[6n")?;
+    terminal_out.flush()?;
+    let mut buffer = vec![];
+    terminal_in.read_until(b'R', &mut buffer)?;
+    buffer.pop();
+    if !buffer.starts_with(b"\x1b[") {
+        return Err("Not expected bytes".into());
+    }
+    let mut iterator = buffer[2..].split(|byte| byte == &b';');
+    let rows = String::from_utf8(Vec::from(iterator.next().unwrap()))?.parse::<u16>()?;
+    let cols = String::from_utf8(Vec::from(iterator.next().unwrap()))?.parse::<u16>()?;
+    Ok(Winsize {
+        ws_row: rows,
+        ws_col: cols,
+        ws_xpixel: 1,
+        ws_ypixel: 1,
+    })
 }

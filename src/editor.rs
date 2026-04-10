@@ -43,11 +43,14 @@ pub fn editor_refresh_screen(terminal_config: &TerminalConfig) -> Result<(), Box
 }
 
 fn drawn_rows(terminal_config: &TerminalConfig) -> Result<(), Box<dyn Error>> {
-    for _ in 0..terminal_config.screen_rows {
-        terminal_config
-            .terminal_out
-            .borrow_mut()
-            .write_all(b"~\r\n")?;
+    for i in 0..terminal_config.screen_rows {
+        terminal_config.terminal_out.borrow_mut().write_all(b"~")?;
+        if i < terminal_config.screen_rows - 1 {
+            terminal_config
+                .terminal_out
+                .borrow_mut()
+                .write_all(b"\r\n")?;
+        }
     }
     Ok(())
 }
