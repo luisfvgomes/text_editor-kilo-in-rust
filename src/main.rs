@@ -17,7 +17,7 @@ fn main() {
             Ok(_) => (),
             Err(e) => panic!("Error refreshing screen: {e}"),
         };
-        if editor_process_keypress(&mut terminal_config.terminal_in.borrow_mut()) {
+        if editor_process_keypress(&terminal_config) {
             break;
         }
     }

@@ -14,6 +14,8 @@ pub struct TerminalConfig<'a> {
     pub screen_cols: u16,
     pub mod_terminal: RefCell<termios::Termios>,
     pub orig_terminal: termios::Termios,
+    pub cursor_x: RefCell<u16>,
+    pub cursor_y: RefCell<u16>,
 }
 impl<'a> TerminalConfig<'a> {
     pub fn new(
@@ -32,6 +34,8 @@ impl<'a> TerminalConfig<'a> {
             screen_cols,
             terminal_in: RefCell::from(terminal_in),
             terminal_out: RefCell::from(terminal_out),
+            cursor_x: RefCell::from(0),
+            cursor_y: RefCell::from(0),
         }
     }
 }
@@ -41,6 +45,8 @@ impl<'a> Drop for TerminalConfig<'a> {
             Ok(_) => (),
             Err(e) => panic!("Error disabling raw mode: {e}"),
         }
+        *self.cursor_x.borrow_mut() = 0;
+        *self.cursor_y.borrow_mut() = 0;
         match editor_refresh_screen(self) {
             Ok(_) => (),
             Err(e) => panic!("Error refreshing screen: {e}"),

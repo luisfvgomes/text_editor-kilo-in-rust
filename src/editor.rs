@@ -1,35 +1,86 @@
 use crate::{CTRL_KEY, VERSION, terminal::TerminalConfig};
-use core::{error::Error, panic};
+use core::error::Error;
 use std::io::{ErrorKind, Read, StdinLock, Write};
 
-pub fn editor_process_keypress(terminal_in: &mut StdinLock) -> bool {
-    let c = editor_read_key(terminal_in);
+#[derive(PartialEq)]
+enum ArrowKeys {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+#[derive(PartialEq)]
+enum KeyType {
+    Letter(u8),
+    Arrow(ArrowKeys),
+}
+
+const MOVE_KEYS: [KeyType; 4] = [
+    KeyType::Arrow(ArrowKeys::Left),
+    KeyType::Arrow(ArrowKeys::Right),
+    KeyType::Arrow(ArrowKeys::Up),
+    KeyType::Arrow(ArrowKeys::Down),
+];
+
+pub fn editor_process_keypress(terminal_config: &TerminalConfig) -> bool {
+    let c = match editor_read_key(&mut terminal_config.terminal_in.borrow_mut()) {
+        Ok(c) => c,
+        Err(e) => panic!("Error reading key: {e}"),
+    };
 
     match c {
-        _ if c == CTRL_KEY!(b'q') => return true,
+        _ if c == KeyType::Letter(CTRL_KEY!(b'q')) => return true,
+        _ if MOVE_KEYS.contains(&c) => move_cursor(terminal_config, c),
         _ => (),
     };
     false
 }
 
-fn editor_read_key(terminal_in: &mut StdinLock) -> u8 {
+fn editor_read_key(terminal_in: &mut StdinLock) -> Result<KeyType, Box<dyn Error>> {
     let mut buffer = [0];
     match terminal_in.read_exact(&mut buffer) {
         Ok(_) => (),
-        Err(error) => match error.kind() {
+        Err(e) => match e.kind() {
             ErrorKind::UnexpectedEof => buffer[0] = 0,
-            _ => panic!("Error reading: {error}"),
+            _ => return Err(Box::from(e)),
         },
     };
-    buffer[0]
+    if buffer[0] == b'\x1b' {
+        let mut seq = [0; 3];
+        match terminal_in.read_exact(&mut seq) {
+            Ok(_) => (),
+            Err(e) => match e.kind() {
+                ErrorKind::UnexpectedEof => (),
+                _ => return Err(Box::from(e)),
+            },
+        };
+        if seq[0] == b'[' {
+            match seq[1] {
+                b'A' => return Ok(KeyType::Arrow(ArrowKeys::Up)),
+                b'B' => return Ok(KeyType::Arrow(ArrowKeys::Down)),
+                b'C' => return Ok(KeyType::Arrow(ArrowKeys::Right)),
+                b'D' => return Ok(KeyType::Arrow(ArrowKeys::Left)),
+                _ => (),
+            }
+        }
+    }
+    Ok(KeyType::Letter(buffer[0]))
 }
 
 pub fn editor_refresh_screen(terminal_config: &TerminalConfig) -> Result<(), Box<dyn Error>> {
     let mut buf = String::new();
     buf.push_str("\x1b[?25l"); // hide cursor
-    buf.push_str("\x1b[H"); //reposition the cursor
+    buf.push_str("\x1b[H"); //reposition cursor
     drawn_rows(terminal_config, &mut buf)?;
-    buf.push_str("\x1b[H");
+    buf.push_str(
+        format!(
+            "\x1b[{};{}H",
+            *terminal_config.cursor_y.borrow() + 1,
+            *terminal_config.cursor_x.borrow() + 1,
+        )
+        .as_str(),
+    ); // reposition cursor
     buf.push_str("\x1b[?25h"); // show cursor
     terminal_config
         .terminal_out
@@ -74,4 +125,32 @@ fn drawn_rows(terminal_config: &TerminalConfig, buf: &mut String) -> Result<(), 
         .borrow_mut()
         .write_all(buf.as_bytes())?;
     Ok(())
+}
+
+fn move_cursor(terminal_config: &TerminalConfig, key: KeyType) {
+    let cx = *terminal_config.cursor_x.borrow();
+    let cy = *terminal_config.cursor_y.borrow();
+    match key {
+        KeyType::Arrow(ArrowKeys::Left) => {
+            if cx > 0 {
+                *terminal_config.cursor_x.borrow_mut() -= 1;
+            }
+        }
+        KeyType::Arrow(ArrowKeys::Right) => {
+            if cx < terminal_config.screen_cols - 1 {
+                *terminal_config.cursor_x.borrow_mut() += 1;
+            }
+        }
+        KeyType::Arrow(ArrowKeys::Up) => {
+            if cy > 0 {
+                *terminal_config.cursor_y.borrow_mut() -= 1;
+            }
+        }
+        KeyType::Arrow(ArrowKeys::Down) => {
+            if cy < terminal_config.screen_rows - 1 {
+                *terminal_config.cursor_y.borrow_mut() += 1;
+            }
+        }
+        _ => panic!("Not a moving key"),
+    }
 }
