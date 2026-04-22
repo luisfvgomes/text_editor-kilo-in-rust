@@ -1,4 +1,4 @@
-use crate::{CTRL_KEY, terminal::TerminalConfig};
+use crate::{CTRL_KEY, VERSION, terminal::TerminalConfig};
 use core::{error::Error, panic};
 use std::io::{ErrorKind, Read, StdinLock, Write};
 
@@ -25,32 +25,53 @@ fn editor_read_key(terminal_in: &mut StdinLock) -> u8 {
 }
 
 pub fn editor_refresh_screen(terminal_config: &TerminalConfig) -> Result<(), Box<dyn Error>> {
+    let mut buf = String::new();
+    buf.push_str("\x1b[?25l"); // hide cursor
+    buf.push_str("\x1b[H"); //reposition the cursor
+    drawn_rows(terminal_config, &mut buf)?;
+    buf.push_str("\x1b[H");
+    buf.push_str("\x1b[?25h"); // show cursor
     terminal_config
         .terminal_out
         .borrow_mut()
-        .write_all(b"\x1b[2J")?; //clean terminal
-    terminal_config
-        .terminal_out
-        .borrow_mut()
-        .write_all(b"\x1b[H")?; //reposition the cursor
-    drawn_rows(terminal_config)?;
-    terminal_config
-        .terminal_out
-        .borrow_mut()
-        .write_all(b"\x1b[H")?; //reposition the cursor
+        .write_all(buf.as_bytes())?;
     terminal_config.terminal_out.borrow_mut().flush()?;
     Ok(())
 }
 
-fn drawn_rows(terminal_config: &TerminalConfig) -> Result<(), Box<dyn Error>> {
+fn drawn_rows(terminal_config: &TerminalConfig, buf: &mut String) -> Result<(), Box<dyn Error>> {
     for i in 0..terminal_config.screen_rows {
-        terminal_config.terminal_out.borrow_mut().write_all(b"~")?;
+        buf.push('~');
+
+        //Welcome mensage
+        if i == terminal_config.screen_rows / 3 {
+            buf.pop();
+            let welcome = format!("kilo editor -- version {}", VERSION);
+            let mut welcomelen = welcome.len() as u16;
+            if welcomelen > terminal_config.screen_cols {
+                welcomelen = terminal_config.screen_cols;
+            }
+            let mut padding = (terminal_config.screen_cols - welcomelen) / 2;
+            if padding != 0 {
+                buf.push('~');
+                padding -= 1;
+            }
+            for _ in 0..padding {
+                buf.push(' ');
+            }
+            buf.push_str(welcome.as_str());
+        }
+
+        buf.push_str("\x1b[K"); // clear line
+
         if i < terminal_config.screen_rows - 1 {
-            terminal_config
-                .terminal_out
-                .borrow_mut()
-                .write_all(b"\r\n")?;
+            buf.push_str("\r\n");
         }
     }
+
+    terminal_config
+        .terminal_out
+        .borrow_mut()
+        .write_all(buf.as_bytes())?;
     Ok(())
 }

@@ -5,6 +5,7 @@ use crate::{
 use core::panic;
 pub mod editor;
 pub mod terminal;
+const VERSION: &str = "0.0.1";
 
 fn main() {
     let terminal_config = match init_terminal_config() {
